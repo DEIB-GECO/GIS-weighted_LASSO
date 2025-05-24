@@ -108,9 +108,6 @@ def find_greedy_samples(df, ratio=0.2):
 def find_not_expressed_genes(df, ratio=0.2):
 
     non_zero_entries_per_gene = df.astype(bool).sum(axis=0).sort_values()
-    #print(df.shape[0])
-    #print(non_zero_entries_per_gene[:20]/df.shape[0])
-    #print(non_zero_entries_per_gene[-20:]/df.shape[0])
     expressed_genes = non_zero_entries_per_gene[non_zero_entries_per_gene/df.shape[0] >= ratio].index
     not_expressed_genes = non_zero_entries_per_gene[non_zero_entries_per_gene/df.shape[0] < ratio].index
     print('N of not expressed genes: ', len(not_expressed_genes))
@@ -119,9 +116,6 @@ def find_not_expressed_genes(df, ratio=0.2):
 def find_not_expressed_genes_threshold(df, threshold = 1, ratio=0.2):
 
     non_zero_entries_per_gene = (df>=threshold).sum(axis=0).sort_values()
-    #print(df.shape[0])
-    #print(non_zero_entries_per_gene[:20]/df.shape[0])
-    #print(non_zero_entries_per_gene[-20:]/df.shape[0])
     expressed_genes = non_zero_entries_per_gene[non_zero_entries_per_gene/df.shape[0] >= ratio].index
     not_expressed_genes = non_zero_entries_per_gene[non_zero_entries_per_gene/df.shape[0] < ratio].index
     print('N of not expressed genes: ', len(not_expressed_genes))
@@ -145,23 +139,19 @@ def shuffle(df, reset = False, seed=42):
 
 def get_samples(df_labels, df_expr, balanced = True, seed=42, is_shuffle=True):
     
-    #print(df_expr.head())
-    #df_labels= df_labels.loc[df_expr.index]
+
     df_h = df_labels[df_labels[df_labels.columns[1]]== True]
     df_c = df_labels[df_labels[df_labels.columns[1]]== False]
     labels_counts = df_h.value_counts(df_h.columns[0])
     print(df_h.shape)
     if balanced:
 
-        #print(df_h.value_counts(df_h.columns[0]))
         min_count = np.min(df_h.value_counts(df_h.columns[0]))
         df_h = df_h.groupby(df_h.columns[0], group_keys=False).apply(lambda x: x.sample(min_count, random_state=seed))
         df_c = df_c.groupby(df_c.columns[0], group_keys=False).apply(lambda x: x.sample(min_count, random_state=seed))
     
     df_final = pd.concat([df_h, df_c])
     
-    #print(df_final.head())
-    #print(df_final.shape)
     df_expr_final = df_expr.loc[df_final.index]
    
     df_final = pd.concat([df_final, df_expr_final], axis=1)
@@ -183,34 +173,40 @@ def preprocessing(df_labels, files_dir, no_mirna= True,
         class_counts = df_labels[df_labels[df_labels.columns[1]]==True].value_counts(df_labels.columns[0])
         print(class_counts)
         outputclasses = class_counts[class_counts >= min_value].index
-        #samples = df_labels[df_labels[df_labels.columns[0]].isin(outputclasses) & df_labels[df_labels.columns[1]]==True].index
         samples = df_labels[df_labels[df_labels.columns[0]].isin(outputclasses)].index
-        #samples = [x for x in samples if x in df_expr.index]
-        #df_expr = df_expr.loc[samples]
         df_labels= df_labels.loc[samples]
-        #print(df_expr.shape)
-
+     
     if class_label is not None:
-        #samples = df_labels[df_labels[df_labels.columns[0]] == class_label].index
         samples = df_labels[df_labels[df_labels.columns[0]].isin(class_label)].index
-        #df_expr = df_expr.loc[samples]
         df_labels= df_labels.loc[samples]
     
     print(df_labels.shape)
     ids_list = df_labels.index.tolist()
     df_expr, _, _ = create_df_from_ids(ids_list, files_dir, no_mirna=no_mirna)
-
+    print('df expr', df_expr.shape)
     print('df labels', df_labels.shape)
     print('----------Removing not expressed genes-----------')
-    # remove genes not expressed in 80% of samples
     not_expressed_genes = find_not_expressed_genes_threshold(df_expr, threshold=4)
     df_reduced = df_expr.drop(not_expressed_genes, axis=1)
     print(df_reduced.shape)
-    # get df with samples
+   
 
-    df_final = get_samples(df_labels, df_reduced , balanced = balanced, seed=seed, is_shuffle=is_shuffle)
-    df_final = df_final.loc[:, ~df_final.columns.duplicated()]
+    df_final = get_samples(df_labels, df_expr , balanced = balanced, seed=seed, is_shuffle=is_shuffle)
+    duplicated_columns = df_final.columns[df_final.columns.duplicated()]
+    duplicated_columns = np.unique(duplicated_columns)
+    not_duplicated_columns = [x for x in df_final.columns if x not in duplicated_columns]
+    print(len(not_duplicated_columns))
+    df_final_new = df_final[not_duplicated_columns]
+    print('final df shape: ', df_final_new.shape)
     
+    print('duplicated columns: ', len(duplicated_columns))
+    for column in tqdm.tqdm(duplicated_columns):
+
+        df_final_new[column] = df_final[column].max(axis=1)
+        
+    df_final = df_final_new
+    print('final df shape: ', df_final.shape)
+
     if coding:
         pc_filename = os.path.join(dire_prior, 'genes_coding.txt')
         pc_genes = load_txt(pc_filename)
@@ -222,13 +218,11 @@ def preprocessing(df_labels, files_dir, no_mirna= True,
         print('final df shape: ', df_final.shape)
         
     if go_ann:
-        # to be fixed
+      
         pc_filename = os.path.join(dire_prior, 'genes_coding_anns.txt')
         pc_genes = load_txt(pc_filename)
-
         #intersection = list(set(df_final.columns) & set(pc_genes))
         intersection = [x for x in pc_genes if x in df_final.columns]
-        #intersection = [x for x in df_final.columns if x in pc_genes]
         print('intersection', len(intersection))
   
     
@@ -237,9 +231,8 @@ def preprocessing(df_labels, files_dir, no_mirna= True,
         print('final df shape: ', df_final.shape)
         
     if is_RPM:
-        print('RPM')
-        #rpm = X / X.sum(axis=0) *1e6
-        #rmp = np.log2(rpm + 1)
+        df_final[intersection] = df_final[intersection].div(df_final[intersection].sum(axis=1).values, axis=0) *1e6
+        df_final[intersection] = np.log2(df_final + 1)
         
     return df_final
 
